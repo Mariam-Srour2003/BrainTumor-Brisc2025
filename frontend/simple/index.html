@@ -1,0 +1,816 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>BRISC 2025 — Brain Tumor Analysis Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --card: #21262d;
+      --card2: #30363d;
+      --border: #30363d;
+      --accent: #388bfd;
+      --accent-hover: #58a6ff;
+      --success: #3fb950;
+      --warn: #d29922;
+      --error: #f85149;
+      --purple: #bc8cff;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      --radius: 6px;
+      --radius-lg: 12px;
+    }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ─── HEADER ─── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      height: 56px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .logo-icon { font-size: 22px; }
+    .logo-title { font-weight: 700; font-size: 15px; color: var(--accent-hover); }
+    .logo-sub { font-size: 11px; color: var(--muted); }
+
+    nav {
+      display: flex;
+      gap: 2px;
+      flex: 1;
+    }
+    .tab-btn {
+      padding: 6px 14px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 13px;
+      font-family: var(--font);
+      cursor: pointer;
+      border-radius: var(--radius);
+      transition: color .15s, background .15s;
+    }
+    .tab-btn:hover { color: var(--text); background: var(--card); }
+    .tab-btn.active { color: var(--text); background: var(--card2); font-weight: 600; }
+
+    .api-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .api-bar input {
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 5px 10px;
+      font-size: 12px;
+      border-radius: var(--radius);
+      width: 210px;
+      font-family: monospace;
+    }
+    .api-bar input:focus { outline: none; border-color: var(--accent); }
+    .conn-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--card2);
+      flex-shrink: 0;
+    }
+    .conn-dot.ok { background: var(--success); box-shadow: 0 0 6px var(--success); }
+    .conn-dot.err { background: var(--error); }
+
+    /* ─── MAIN ─── */
+    main { flex: 1; padding: 28px 28px 48px; max-width: 1140px; margin: 0 auto; width: 100%; }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* ─── PAGE TITLE ─── */
+    .page-title {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 22px;
+      color: var(--text);
+    }
+    .page-subtitle {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: -16px;
+      margin-bottom: 22px;
+    }
+
+    /* ─── BUTTONS ─── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-family: var(--font);
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity .15s, background .15s;
+    }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:not(:disabled):hover { background: var(--accent-hover); }
+    .btn-secondary { background: var(--card2); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:not(:disabled):hover { background: var(--card); }
+    .btn-danger { background: var(--error); color: #fff; }
+    .btn-full { width: 100%; justify-content: center; }
+    .btn-sm { padding: 5px 11px; font-size: 12px; }
+
+    /* ─── CARDS ROW ─── */
+    .cards-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 18px 20px;
+    }
+    .stat-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+    .stat-value { font-size: 26px; font-weight: 700; color: var(--text); }
+    .stat-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+    /* ─── SECTION TITLE ─── */
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      margin: 22px 0 10px;
+    }
+
+    /* ─── STEP CARDS (train tab) ─── */
+    .step-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 22px 24px;
+      display: flex;
+      gap: 20px;
+      margin-bottom: 16px;
+    }
+    .step-num {
+      width: 32px; height: 32px;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 14px;
+      flex-shrink: 0;
+    }
+    .step-body { flex: 1; }
+    .step-title { font-weight: 600; font-size: 15px; margin-bottom: 6px; }
+    .step-desc { font-size: 13px; color: var(--muted); margin-bottom: 14px; }
+
+    /* ─── FORM FIELDS ─── */
+    .field-row { margin-bottom: 12px; }
+    .field-row label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 5px;
+      font-weight: 500;
+    }
+    .field-row select,
+    .field-row input[type="number"],
+    .field-row input[type="text"] {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 7px 10px;
+      font-size: 13px;
+      border-radius: var(--radius);
+      font-family: var(--font);
+    }
+    .field-row select:focus,
+    .field-row input:focus { outline: none; border-color: var(--accent); }
+    .checkbox-label {
+      display: flex !important;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 13px !important;
+      color: var(--text) !important;
+    }
+    .checkbox-label input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; }
+
+    /* ─── RESULT AREA ─── */
+    .result-area {
+      margin-top: 14px;
+      padding: 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 12px;
+      font-family: monospace;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 280px;
+      overflow-y: auto;
+      display: none;
+    }
+    .result-area.visible { display: block; }
+
+    /* ─── SPINNER ─── */
+    .spinner {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      margin-left: 10px;
+      vertical-align: middle;
+    }
+    .spinner.hidden { display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ─── MODEL CHIPS ─── */
+    .model-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .model-chip {
+      padding: 4px 12px;
+      background: var(--card2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: 12px;
+      color: var(--muted);
+      font-family: monospace;
+    }
+    .model-chip.classification { border-color: #388bfd55; color: var(--accent-hover); }
+    .model-chip.segmentation { border-color: #3fb95055; color: var(--success); }
+    .model-chip.hybrid { border-color: #bc8cff55; color: var(--purple); }
+
+    /* ─── PREDICT LAYOUT ─── */
+    .two-col { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
+    @media (max-width: 780px) { .two-col { grid-template-columns: 1fr; } }
+
+    .controls-panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+    }
+
+    /* ─── UPLOAD ZONE ─── */
+    .upload-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius-lg);
+      padding: 28px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+      margin-bottom: 14px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .upload-zone:hover, .upload-zone.drag { border-color: var(--accent); background: #388bfd0d; }
+    .upload-icon { font-size: 28px; margin-bottom: 8px; }
+    .upload-link { color: var(--accent); cursor: pointer; text-decoration: underline; }
+
+    .preview-wrap {
+      margin-bottom: 14px;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border);
+      display: none;
+    }
+    .preview-wrap.visible { display: block; }
+    .preview-wrap img { width: 100%; display: block; max-height: 200px; object-fit: cover; }
+
+    /* ─── RESULTS PANEL ─── */
+    .results-panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      min-height: 300px;
+    }
+
+    .empty-state {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 200px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    /* ─── CLASSIFICATION RESULT ─── */
+    .cls-result { }
+    .cls-badge {
+      display: inline-block;
+      padding: 6px 18px;
+      border-radius: 20px;
+      font-size: 17px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    .cls-confidence {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+    .prob-bars { display: flex; flex-direction: column; gap: 8px; }
+    .prob-row { display: flex; align-items: center; gap: 10px; }
+    .prob-label { width: 100px; font-size: 12px; color: var(--muted); text-align: right; flex-shrink: 0; }
+    .prob-bar-wrap { flex: 1; background: var(--surface); border-radius: 4px; height: 14px; overflow: hidden; }
+    .prob-bar { height: 100%; border-radius: 4px; transition: width .4s ease; }
+    .prob-pct { width: 42px; font-size: 12px; color: var(--muted); text-align: right; flex-shrink: 0; }
+
+    /* class colours */
+    .cls-glioma      { background: #ef444422; color: #ef4444; border: 1px solid #ef444433; }
+    .cls-meningioma  { background: #f59e0b22; color: #f59e0b; border: 1px solid #f59e0b33; }
+    .cls-no_tumor    { background: #10b98122; color: #10b981; border: 1px solid #10b98133; }
+    .cls-pituitary   { background: #8b5cf622; color: #8b5cf6; border: 1px solid #8b5cf633; }
+    .bar-glioma      { background: #ef4444; }
+    .bar-meningioma  { background: #f59e0b; }
+    .bar-no_tumor    { background: #10b981; }
+    .bar-pituitary   { background: #8b5cf6; }
+    .bar-default     { background: var(--accent); }
+
+    /* ─── SEGMENTATION RESULT ─── */
+    .seg-images {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-top: 8px;
+    }
+    .seg-img-card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .seg-img-label {
+      padding: 6px 10px;
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .seg-img-card img { width: 100%; display: block; }
+
+    /* ─── XAI RESULT ─── */
+    .xai-images {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-top: 8px;
+    }
+    .xai-img-card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .xai-img-label {
+      padding: 6px 10px;
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .xai-img-card img { width: 100%; display: block; }
+
+    /* ─── METRICS GRID ─── */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .metric-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      text-align: center;
+    }
+    .metric-name { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+    .metric-val  { font-size: 28px; font-weight: 700; margin: 6px 0 0; }
+    .metric-val.good { color: var(--success); }
+    .metric-val.warn { color: var(--warn); }
+    .metric-val.bad  { color: var(--error); }
+
+    /* ─── CONFUSION MATRIX ─── */
+    .cm-wrap {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: inline-block;
+    }
+    .cm-wrap img { display: block; max-width: 100%; }
+
+    /* ─── TOAST ─── */
+    #toast-container {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 8px;
+      z-index: 9999;
+    }
+    .toast {
+      background: var(--card2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 16px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      max-width: 340px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.5);
+      animation: slideIn .2s ease;
+    }
+    .toast.success { border-left: 3px solid var(--success); }
+    .toast.error   { border-left: 3px solid var(--error); }
+    .toast.info    { border-left: 3px solid var(--accent); }
+    @keyframes slideIn { from { opacity:0; transform:translateX(20px); } to { opacity:1; transform:none; } }
+
+    /* ─── TAG ─── */
+    .tag {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .tag-joint { background: #bc8cff22; color: var(--purple); border: 1px solid #bc8cff33; }
+    .tag-cls   { background: #388bfd22; color: var(--accent-hover); border: 1px solid #388bfd33; }
+    .tag-seg   { background: #3fb95022; color: var(--success); border: 1px solid #3fb95033; }
+
+    /* ─── DIVIDER ─── */
+    .divider { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+
+    /* ─── STATUS ROW ─── */
+    .status-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+
+    /* ─── QUICK ACTIONS ─── */
+    .action-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+
+    /* ─── TRAINING PROGRESS ─── */
+    .train-status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-top: 12px;
+      font-size: 13px;
+      display: none;
+    }
+    .train-status.visible { display: flex; }
+
+    /* ─── LOSS CHART ─── */
+    .loss-chart-wrap {
+      margin-top: 18px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 16px 18px 12px;
+      display: none;
+    }
+    .loss-chart-wrap.visible { display: block; }
+    .loss-chart-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .loss-chart-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+    .loss-chart-epoch { font-size: 12px; color: var(--muted); }
+    .loss-chart-legend { display: flex; gap: 16px; margin-bottom: 8px; }
+    .loss-legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+    .loss-legend-dot { width: 10px; height: 3px; border-radius: 2px; }
+    canvas#lossChart { width: 100%; height: 180px; display: block; border-radius: var(--radius); }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════ HEADER ═══ -->
+<header>
+  <div class="logo">
+    <span class="logo-icon">🧠</span>
+    <div>
+      <div class="logo-title">BRISC 2025</div>
+      <div class="logo-sub">Brain Tumor Analysis</div>
+    </div>
+  </div>
+
+  <nav id="mainNav">
+    <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+    <button class="tab-btn" data-tab="train">Train</button>
+    <button class="tab-btn" data-tab="predict">Predict</button>
+    <button class="tab-btn" data-tab="evaluate">Evaluate</button>
+    <button class="tab-btn" data-tab="xai">XAI</button>
+  </nav>
+
+  <div class="api-bar">
+    <input id="apiBase" value="http://localhost:8000" placeholder="API base URL" />
+    <button class="btn btn-sm btn-secondary" id="btnConnect">Connect</button>
+    <span class="conn-dot" id="connDot" title="Disconnected"></span>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════ MAIN ════ -->
+<main>
+
+  <!-- ─────────────────────── DASHBOARD ─── -->
+  <section id="tab-dashboard" class="tab-content active">
+    <div class="page-title">Dashboard</div>
+    <div class="page-subtitle">Brain tumor segmentation &amp; classification · BRISC 2025</div>
+
+    <div class="cards-row">
+      <div class="stat-card">
+        <div class="stat-label">Service</div>
+        <div class="stat-value" id="statHealth">—</div>
+        <div class="stat-sub" id="statHealthSub">Not connected</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Registered Models</div>
+        <div class="stat-value" id="statModels">—</div>
+        <div class="stat-sub">classification + segmentation + joint</div>
+      </div>
+    </div>
+
+    <div class="section-title">Quick Actions</div>
+    <div class="action-row">
+      <button class="btn btn-primary" id="dashBtnPrepare">Prepare Dataset</button>
+      <button class="btn btn-secondary" id="dashBtnRefresh">Refresh Models</button>
+    </div>
+    <div id="dashOutput" class="result-area"></div>
+
+    <div class="section-title">Available Models</div>
+    <div id="modelChips" class="model-chips"><span style="color:var(--muted);font-size:13px">Connect to load models…</span></div>
+  </section>
+
+  <!-- ─────────────────────── TRAIN ─── -->
+  <section id="tab-train" class="tab-content">
+    <div class="page-title">Train</div>
+    <div class="page-subtitle">Prepare data, train individual models, or run hyperparameter tuning</div>
+
+    <!-- Step 1 -->
+    <div class="step-card">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <div class="step-title">Prepare Dataset</div>
+        <div class="step-desc">
+          Preprocess and normalize the BRISC 2025 dataset (resize to 224×224, apply ImageNet normalization).
+          Required before first training run.
+        </div>
+        <button class="btn btn-primary" id="btnPrepare">Prepare Dataset</button>
+        <span class="spinner hidden" id="prepareSpinner"></span>
+        <div class="result-area" id="prepareResult"></div>
+      </div>
+    </div>
+
+    <!-- Step 2 -->
+    <div class="step-card">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <div class="step-title">Train Model</div>
+        <div class="step-desc">
+          Select a model architecture and train it. Models are grouped by task: classification,
+          segmentation, or joint multitask (segmentation + classification simultaneously).
+        </div>
+        <div class="field-row">
+          <label>Model Architecture</label>
+          <select id="trainModelSelect">
+            <option value="">— Connect to load models —</option>
+          </select>
+        </div>
+        <div class="action-row">
+          <button class="btn btn-primary" id="btnTrain" disabled>Train Selected</button>
+          <button class="btn btn-secondary" id="btnTrainAll" disabled>Train All Models</button>
+          <span class="spinner hidden" id="trainSpinner"></span>
+        </div>
+        <div class="train-status" id="trainStatus">
+          <span class="spinner"></span>
+          <span id="trainStatusText">Training in progress — this may take several minutes…</span>
+        </div>
+        <!-- Live loss chart (populated via SSE) -->
+        <div class="loss-chart-wrap" id="lossChartWrap">
+          <div class="loss-chart-header">
+            <span class="loss-chart-title">Live Training Loss</span>
+            <span class="loss-chart-epoch" id="lossChartEpoch">Epoch 0 / —</span>
+          </div>
+          <div class="loss-chart-legend">
+            <div class="loss-legend-item"><div class="loss-legend-dot" style="background:#388bfd"></div>Train loss</div>
+            <div class="loss-legend-item"><div class="loss-legend-dot" style="background:#3fb950"></div>Val loss</div>
+          </div>
+          <canvas id="lossChart"></canvas>
+        </div>
+        <div class="result-area" id="trainResult"></div>
+      </div>
+    </div>
+
+    <!-- Step 3: Hyperparameter tuning -->
+    <div class="step-card">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <div class="step-title">Hyperparameter Tuning (Joint Model)</div>
+        <div class="step-desc">
+          Run random-search tuning over the joint multitask model. Explores learning rate,
+          weight decay, batch size, optimizer, and loss weights.
+        </div>
+        <div class="field-row" style="max-width:180px">
+          <label>Number of Trials</label>
+          <input type="number" id="tuneTrials" value="5" min="1" max="30" />
+        </div>
+        <button class="btn btn-secondary" id="btnTune" disabled>Run Tuning</button>
+        <span class="spinner hidden" id="tuneSpinner"></span>
+        <div class="result-area" id="tuneResult"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────── PREDICT ─── -->
+  <section id="tab-predict" class="tab-content">
+    <div class="page-title">Predict</div>
+    <div class="page-subtitle">Upload a brain MRI slice — get classification labels and/or segmentation masks</div>
+
+    <div class="two-col">
+      <!-- Left: controls -->
+      <div class="controls-panel">
+        <div class="upload-zone" id="predictUploadZone">
+          <div class="upload-icon">📷</div>
+          <div>Drop MRI image here or <label for="predictFile" class="upload-link">browse</label></div>
+          <div style="font-size:11px;margin-top:4px">JPEG · PNG</div>
+          <input id="predictFile" type="file" accept="image/*" hidden />
+        </div>
+        <div class="preview-wrap" id="predictPreview">
+          <img id="predictPreviewImg" alt="Preview" />
+        </div>
+
+        <div class="field-row">
+          <label>Model (leave blank for latest checkpoint)</label>
+          <select id="predictModelSelect">
+            <option value="">— Auto: latest checkpoint —</option>
+          </select>
+        </div>
+
+        <hr class="divider" />
+
+        <div class="field-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="explainChk" />
+            Include XAI Explanation
+          </label>
+        </div>
+        <div id="predictXaiOpts" style="display:none">
+          <div class="field-row">
+            <label>XAI Method</label>
+            <select id="predictXaiMethod">
+              <option value="gradcam">Grad-CAM</option>
+              <option value="shap">SHAP</option>
+              <option value="lime">LIME</option>
+            </select>
+          </div>
+        </div>
+
+        <button class="btn btn-primary btn-full" id="btnPredict" disabled>Run Prediction</button>
+        <div class="train-status" id="predictStatus">
+          <span class="spinner"></span>
+          <span>Running prediction…</span>
+        </div>
+      </div>
+
+      <!-- Right: results -->
+      <div class="results-panel" id="predictResults">
+        <div class="empty-state">
+          Upload an image and click <strong>Run Prediction</strong> to see results.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────── EVALUATE ─── -->
+  <section id="tab-evaluate" class="tab-content">
+    <div class="page-title">Evaluate</div>
+    <div class="page-subtitle">Run full evaluation on the test split and export a confusion matrix &amp; metrics report</div>
+
+    <div class="controls-panel" style="max-width:500px;margin-bottom:24px">
+      <div class="field-row">
+        <label>Model Checkpoint</label>
+        <select id="evalModelSelect">
+          <option value="">— Select model —</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <label>Evaluation Split</label>
+        <select id="evalSplit">
+          <option value="test">test</option>
+          <option value="train">train</option>
+        </select>
+      </div>
+      <div class="action-row">
+        <button class="btn btn-primary" id="btnEvaluate" disabled>Evaluate</button>
+        <span class="spinner hidden" id="evalSpinner"></span>
+      </div>
+    </div>
+
+    <div id="evalResults"></div>
+  </section>
+
+  <!-- ─────────────────────── XAI ─── -->
+  <section id="tab-xai" class="tab-content">
+    <div class="page-title">Explainable AI</div>
+    <div class="page-subtitle">Generate Grad-CAM heatmaps, SHAP attributions, or LIME superpixel explanations</div>
+
+    <div class="two-col">
+      <!-- Left: controls -->
+      <div class="controls-panel">
+        <div class="upload-zone" id="xaiUploadZone">
+          <div class="upload-icon">🔍</div>
+          <div>Drop MRI image here or <label for="xaiFile" class="upload-link">browse</label></div>
+          <input id="xaiFile" type="file" accept="image/*" hidden />
+        </div>
+        <div class="preview-wrap" id="xaiPreview">
+          <img id="xaiPreviewImg" alt="XAI Preview" />
+        </div>
+
+        <div class="field-row">
+          <label>Model</label>
+          <select id="xaiModelSelect">
+            <option value="">— Auto: latest checkpoint —</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <label>XAI Method</label>
+          <select id="xaiMethodSelect">
+            <option value="gradcam">Grad-CAM (fast, no extra deps)</option>
+            <option value="shap">SHAP (requires shap package)</option>
+            <option value="lime">LIME (requires lime package)</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <label>Target Task</label>
+          <select id="xaiTaskSelect">
+            <option value="auto">Auto-detect from checkpoint</option>
+            <option value="classification">Classification</option>
+            <option value="segmentation">Segmentation</option>
+            <option value="both">Both (joint models)</option>
+          </select>
+        </div>
+
+        <button class="btn btn-primary btn-full" id="btnExplain" disabled>Generate Explanation</button>
+        <div class="train-status" id="xaiStatus">
+          <span class="spinner"></span>
+          <span>Generating explanation…</span>
+        </div>
+      </div>
+
+      <!-- Right: results -->
+      <div class="results-panel" id="xaiResults">
+        <div class="empty-state">
+          Upload an image and click <strong>Generate Explanation</strong> to see results.
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ─────────────────────── TOAST ─── -->
+<div id="toast-container"></div>
+
+<script src="/ui/app.js"></script>
+</body>
+</html>

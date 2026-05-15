@@ -92,6 +92,13 @@ class Predictor:
         return max(candidates, key=lambda path: path.stat().st_mtime) if candidates else None
 
     def _build_model_from_name(self, model_name: str) -> Any:
+        if model_name == "classification.view_classifier":
+            return DEFAULT_MODEL_REGISTRY.create(
+                model_name,
+                num_classes=len(self.config.view_class_names),
+                in_channels=3,
+            )
+
         if model_name.startswith("classification."):
             return DEFAULT_MODEL_REGISTRY.create(
                 model_name,
@@ -120,10 +127,12 @@ class Predictor:
 
     def _infer_checkpoint_task(self, metadata: dict[str, Any], checkpoint_path: Path) -> str:
         task = str(metadata.get("task") or "").strip().lower()
-        if task in {"classification", "segmentation", "joint"}:
+        if task in {"classification", "segmentation", "joint", "view_classification"}:
             return task
 
         name = checkpoint_path.stem.lower()
+        if "view_classifier" in name:
+            return "view_classification"
         if "segmentation" in name:
             return "segmentation"
         if "classification" in name:
@@ -133,6 +142,10 @@ class Predictor:
     def _candidate_model_names(self, task: str, model_name: str) -> tuple[str, ...]:
         registered = DEFAULT_MODEL_REGISTRY.list_models()
         candidates: list[str] = []
+
+        if task == "view_classification":
+            candidates.append("classification.view_classifier")
+            return tuple(candidates)
 
         if model_name in registered:
             candidates.append(model_name)

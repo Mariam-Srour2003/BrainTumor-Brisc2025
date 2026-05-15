@@ -8,8 +8,9 @@ from typing import Any
 
 from ..core.config import ServiceConfig, get_settings
 from ..core.runtime import get_logger, log_step
-from ..data.preprocessing import ProcessingSummary, materialize_clean_dataset
-from ..data.dataset import discover_classification_samples, discover_segmentation_pairs
+from ..core.constants import VIEW_CODES
+from ..data.preprocessing import ProcessingSummary, materialize_clean_dataset, materialize_divided_dataset
+from ..data.dataset import discover_classification_samples, discover_segmentation_pairs, discover_view_classification_samples
 from ..models import DEFAULT_MODEL_REGISTRY
 from ..training import HyperparameterSearchSpace, Trainer, TrainingConfig, TuningSummary, tune_hyperparameters
 from ..evaluation import export_evaluation_report
@@ -93,6 +94,24 @@ def prepare_dataset(config: ServiceConfig | None = None, output_root: str | Path
 
     settings = config or get_settings()
     return materialize_clean_dataset(settings, output_root=output_root)
+
+
+def prepare_divided_dataset(config: ServiceConfig | None = None, output_root: str | Path | None = None) -> ProcessingSummary:
+    """Materialize the brisc2025divided dataset to disk."""
+
+    settings = config or get_settings()
+    return materialize_divided_dataset(settings, output_root=output_root)
+
+
+def _parse_view_suffix(model_name: str) -> tuple[str, str | None]:
+    """Split 'classification.efficientnet.finetune.ax' → ('classification.efficientnet.finetune', 'ax').
+
+    Returns (model_name, None) when no view suffix is present.
+    """
+    parts = model_name.rsplit(".", 1)
+    if len(parts) == 2 and parts[1] in VIEW_CODES:
+        return parts[0], parts[1]
+    return model_name, None
 
 
 def build_joint_trainer(config: ServiceConfig | None = None) -> Trainer:
@@ -200,15 +219,44 @@ def run_registered_model_training(model_name: str, config: ServiceConfig | None 
 
     settings = config or get_settings()
 
+    # View-specific models use the divided preprocessed data and filter by MRI view.
+    base_name, view_filter = _parse_view_suffix(model_name)
+    processed_root = settings.processed_divided_data_root if view_filter else None
+
     try:
         removed_artifacts = _clear_existing_model_artifacts(settings, model_name)
-        if model_name.startswith("classification."):
+        if model_name == "classification.view_classifier":
+            model = DEFAULT_MODEL_REGISTRY.create(
+                model_name,
+                num_classes=len(settings.view_class_names),
+                in_channels=3,
+            )
+            trainer = Trainer(
+                model=model, config=settings,
+                training_config=TrainingConfig.from_service_config(settings),
+                task="view_classification",
+            )
+            train_result = trainer.fit_classification(split="train", checkpoint_name=model_name)
+            if train_result.status == "failed":
+                return {
+                    "status": "failed",
+                    "model_name": model_name,
+                    "message": train_result.metadata.get("reason", "Training failed — no data found or model error."),
+                    "removed_artifacts": removed_artifacts,
+                }
+            eval_result = trainer.evaluate_classification(split="test")
+            task = "view_classification"
+        elif base_name.startswith("classification."):
             model = DEFAULT_MODEL_REGISTRY.create(
                 model_name,
                 num_classes=len(settings.class_names),
                 in_channels=3,
             )
-            trainer = Trainer(model=model, config=settings, training_config=TrainingConfig.from_service_config(settings))
+            trainer = Trainer(
+                model=model, config=settings,
+                training_config=TrainingConfig.from_service_config(settings),
+                view_filter=view_filter, processed_root=processed_root,
+            )
             train_result = trainer.fit_classification(split="train", checkpoint_name=model_name)
             if train_result.status == "failed":
                 return {
@@ -219,13 +267,17 @@ def run_registered_model_training(model_name: str, config: ServiceConfig | None 
                 }
             eval_result = trainer.evaluate_classification(split="test")
             task = "classification"
-        elif model_name.startswith("segmentation."):
+        elif base_name.startswith("segmentation."):
             model = DEFAULT_MODEL_REGISTRY.create(
                 model_name,
                 num_classes=1,
                 in_channels=3,
             )
-            trainer = Trainer(model=model, config=settings, training_config=TrainingConfig.from_service_config(settings))
+            trainer = Trainer(
+                model=model, config=settings,
+                training_config=TrainingConfig.from_service_config(settings),
+                view_filter=view_filter, processed_root=processed_root,
+            )
             train_result = trainer.fit_segmentation(split="train", checkpoint_name=model_name)
             if train_result.status == "failed":
                 return {
@@ -236,14 +288,18 @@ def run_registered_model_training(model_name: str, config: ServiceConfig | None 
                 }
             eval_result = trainer.evaluate_segmentation(split="test")
             task = "segmentation"
-        elif model_name.startswith("hybrid."):
+        elif base_name.startswith("hybrid."):
             model = DEFAULT_MODEL_REGISTRY.create(
                 model_name,
                 num_classes=len(settings.joint_class_names),
                 segmentation_classes=1,
                 in_channels=3,
             )
-            trainer = Trainer(model=model, config=settings, training_config=TrainingConfig.from_service_config(settings))
+            trainer = Trainer(
+                model=model, config=settings,
+                training_config=TrainingConfig.from_service_config(settings),
+                view_filter=view_filter, processed_root=processed_root,
+            )
             train_result = trainer.fit_joint(split="train", checkpoint_name=model_name)
             if train_result.status == "failed":
                 return {
@@ -295,10 +351,12 @@ def run_registered_model_training(model_name: str, config: ServiceConfig | None 
 
 def _infer_checkpoint_task(metadata: dict[str, Any], checkpoint_path: Path) -> str:
     task = str(metadata.get("task") or "").strip().lower()
-    if task in {"classification", "segmentation", "joint"}:
+    if task in {"classification", "segmentation", "joint", "view_classification"}:
         return task
 
     name = checkpoint_path.stem.lower()
+    if "view_classifier" in name:
+        return "view_classification"
     if "segmentation" in name:
         return "segmentation"
     if "classification" in name:
@@ -309,6 +367,10 @@ def _infer_checkpoint_task(metadata: dict[str, Any], checkpoint_path: Path) -> s
 def _candidate_model_names(task: str, model_name: str) -> tuple[str, ...]:
     registered = DEFAULT_MODEL_REGISTRY.list_models()
     candidates: list[str] = []
+
+    if task == "view_classification":
+        candidates.append("classification.view_classifier")
+        return tuple(candidates)
 
     if model_name in registered:
         candidates.append(model_name)
@@ -339,7 +401,13 @@ def _load_model_for_checkpoint(checkpoint_path: Path, settings: ServiceConfig) -
 
     for candidate in _candidate_model_names(task, model_name):
         try:
-            if candidate.startswith("classification."):
+            if candidate == "classification.view_classifier" or task == "view_classification":
+                model = DEFAULT_MODEL_REGISTRY.create(
+                    "classification.view_classifier",
+                    num_classes=len(settings.view_class_names),
+                    in_channels=3,
+                )
+            elif candidate.startswith("classification."):
                 model = DEFAULT_MODEL_REGISTRY.create(
                     candidate,
                     num_classes=len(settings.class_names),
@@ -381,14 +449,29 @@ def run_checkpoint_evaluation(
     settings = config or get_settings()
     checkpoint_path = Path(checkpoint_path)
     model, metadata, task, model_name = _load_model_for_checkpoint(checkpoint_path, settings)
-    trainer = Trainer(model=model, config=settings, training_config=TrainingConfig.from_service_config(settings))
+    _, view_filter = _parse_view_suffix(model_name)
+    processed_root = settings.processed_divided_data_root if view_filter else None
+    trainer_task = "view_classification" if task == "view_classification" else "classification"
+    trainer = Trainer(
+        model=model, config=settings,
+        training_config=TrainingConfig.from_service_config(settings),
+        view_filter=view_filter, processed_root=processed_root,
+        task=trainer_task,
+    )
 
-    if task == "classification":
+    if task in {"classification", "view_classification"}:
         evaluation = trainer.evaluate_classification(split=split)
     elif task == "segmentation":
         evaluation = trainer.evaluate_segmentation(split=split)
     else:
         evaluation = trainer.evaluate_joint(split=split)
+
+    if task == "view_classification":
+        report_class_names = settings.view_class_names
+    elif task == "joint":
+        report_class_names = settings.joint_class_names
+    else:
+        report_class_names = settings.class_names
 
     report = export_evaluation_report(
         settings.outputs_dir / "evaluations",
@@ -398,7 +481,7 @@ def run_checkpoint_evaluation(
         metrics=evaluation.metrics,
         analysis=evaluation.metadata.get("analysis", {}),
         checkpoint_path=checkpoint_path,
-        class_names=settings.joint_class_names if task == "joint" else settings.class_names,
+        class_names=report_class_names,
     )
 
     return {

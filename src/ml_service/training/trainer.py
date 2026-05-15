@@ -21,6 +21,7 @@ from ..data.dataset import (
     discover_classification_samples,
     discover_joint_samples,
     discover_segmentation_pairs,
+    discover_view_classification_samples,
 )
 from ..data.preprocessing import (
     ImagePreprocessingConfig,
@@ -420,14 +421,30 @@ class Trainer:
         *,
         config: ServiceConfig | None = None,
         training_config: TrainingConfig | None = None,
+        view_filter: str | None = None,
+        processed_root: "Path | None" = None,
+        task: str = "classification",
     ) -> None:
         self.model = model
         self.config = config or get_settings()
         self.training_config = training_config or TrainingConfig.from_service_config(self.config)
+        self.view_filter = view_filter
+        self.processed_root = processed_root
+        self.task = task
         self.logger = get_logger("training.trainer")
         self.training_run_date = format_checkpoint_run_date()
         self.torch, self.device = self._init_device()
         log_step(self.logger, f"Trainer initialized on device={self.device}.")
+
+    def _get_classification_records(self, split: str) -> list[DatasetRecord]:
+        if self.task == "view_classification":
+            return discover_view_classification_samples(split, processed_root=self.processed_root)
+        return discover_classification_samples(split, processed_root=self.processed_root, view_filter=self.view_filter)
+
+    def _get_class_names(self) -> tuple[str, ...]:
+        if self.task == "view_classification":
+            return self.config.view_class_names
+        return self.config.class_names
 
     def _init_device(self) -> tuple[Any | None, Any | None]:
         try:
@@ -525,7 +542,7 @@ class Trainer:
         if self.model is None:
             return TrainingResult(status="failed", metadata={"reason": "No model provided."})
 
-        all_records = discover_classification_samples(split)
+        all_records = self._get_classification_records(split)
         if not all_records:
             return TrainingResult(status="failed", metadata={"reason": f"No classification samples for split={split}."})
 
@@ -558,7 +575,7 @@ class Trainer:
 
         preprocessing = self._make_preprocessing(augment=True)
         val_prep = self._make_preprocessing(augment=False)
-        label_to_index = _label_to_index_map(self.config.class_names)
+        label_to_index = _label_to_index_map(self._get_class_names())
 
         raw_weights = _compute_class_weights(base_train, label_to_index)
         class_weights = torch.tensor(raw_weights, dtype=torch.float32)
@@ -730,7 +747,7 @@ class Trainer:
 
             last_ckpt = self._save_training_checkpoint(
                 checkpoint_path=ckpt_path, model=model, optimizer=optimizer, epoch=epoch,
-                task="classification", split=split,
+                task=self.task, split=split,
                 metrics={"loss": avg_train_loss, "val_loss": avg_val_loss},
                 extra_metadata={"best_val_loss": best_val_loss},
             )
@@ -790,7 +807,7 @@ class Trainer:
         if self.model is None:
             return TrainingResult(status="failed", metadata={"reason": "No model provided."})
 
-        records = discover_classification_samples(split)
+        records = self._get_classification_records(split)
         if not records:
             return TrainingResult(status="failed", metadata={"reason": f"No classification samples for split={split}."})
 
@@ -800,7 +817,7 @@ class Trainer:
         model.eval()
 
         preprocessing = self._make_preprocessing(augment=False)
-        label_to_index = _label_to_index_map(self.config.class_names)
+        label_to_index = _label_to_index_map(self._get_class_names())
         preds: list[np.ndarray] = []
         targets: list[np.ndarray] = []
 
@@ -837,7 +854,7 @@ class Trainer:
         if self.model is None:
             return TrainingResult(status="failed", metadata={"reason": "No model provided."})
 
-        all_records = [r for r in discover_segmentation_pairs(split) if r.mask_path is not None]
+        all_records = [r for r in discover_segmentation_pairs(split, processed_root=self.processed_root, view_filter=self.view_filter) if r.mask_path is not None]
         if not all_records:
             return TrainingResult(status="failed", metadata={"reason": f"No segmentation samples for split={split}."})
 
@@ -1057,7 +1074,7 @@ class Trainer:
         if self.model is None:
             return TrainingResult(status="failed", metadata={"reason": "No model provided."})
 
-        records = [r for r in discover_segmentation_pairs(split) if r.mask_path is not None]
+        records = [r for r in discover_segmentation_pairs(split, processed_root=self.processed_root, view_filter=self.view_filter) if r.mask_path is not None]
         if not records:
             return TrainingResult(status="failed", metadata={"reason": f"No segmentation samples for split={split}."})
 
@@ -1101,7 +1118,7 @@ class Trainer:
         if self.model is None:
             return TrainingResult(status="failed", metadata={"reason": "No model provided."})
 
-        all_records = discover_joint_samples(split)
+        all_records = discover_joint_samples(split, processed_root=self.processed_root, view_filter=self.view_filter)
         if not all_records:
             return TrainingResult(status="failed", metadata={"reason": f"No joint samples for split={split}."})
 
@@ -1450,7 +1467,7 @@ class Trainer:
         if self.model is None:
             return TrainingResult(status="failed", metadata={"reason": "No model provided."})
 
-        records = discover_joint_samples(split)
+        records = discover_joint_samples(split, processed_root=self.processed_root, view_filter=self.view_filter)
         if not records:
             return TrainingResult(status="failed", metadata={"reason": f"No joint samples for split={split}."})
 

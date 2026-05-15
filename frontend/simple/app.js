@@ -71,6 +71,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 let registeredModels = [];
 
 function chipClass(name) {
+  if (name === 'classification.view_classifier') return 'view';
   if (name.startsWith('classification.')) return 'classification';
   if (name.startsWith('segmentation.'))   return 'segmentation';
   if (name.startsWith('hybrid.'))         return 'hybrid';
@@ -165,6 +166,18 @@ document.getElementById('dashBtnPrepare').addEventListener('click', async () => 
   else toast('Prepare failed: ' + (data.message || 'unknown error'), 'error');
 });
 
+document.getElementById('dashBtnPrepareDivided').addEventListener('click', async () => {
+  setResult('dashOutput', 'Preprocessing divided dataset…');
+  const { data } = await apiFetch('/train/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'prepare_divided' }),
+  });
+  setResult('dashOutput', data, true);
+  if (data.status === 'completed') toast(`Divided dataset ready: ${data.processed_count} processed`, 'success');
+  else toast('Preprocess divided failed: ' + (data.message || 'unknown error'), 'error');
+});
+
 document.getElementById('dashBtnRefresh').addEventListener('click', async () => {
   await loadModels();
   toast('Models refreshed', 'info');
@@ -185,6 +198,21 @@ document.getElementById('btnPrepare').addEventListener('click', async () => {
   if (data.status === 'completed')
     toast(`Dataset prepared — ${data.processed_count} images processed, ${data.skipped_count} skipped`, 'success');
   else toast('Prepare failed: ' + (data.message || JSON.stringify(data)), 'error');
+});
+
+document.getElementById('btnPrepareDivided').addEventListener('click', async () => {
+  spinner('prepareSpinner', true);
+  setResult('prepareResult', 'Preprocessing divided dataset…');
+  const { data } = await apiFetch('/train/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'prepare_divided' }),
+  });
+  spinner('prepareSpinner', false);
+  setResult('prepareResult', data, true);
+  if (data.status === 'completed')
+    toast(`Divided dataset preprocessed — ${data.processed_count} images processed, ${data.skipped_count} skipped`, 'success');
+  else toast('Preprocess divided failed: ' + (data.message || JSON.stringify(data)), 'error');
 });
 
 // ─── LOSS CHART ──────────────────────────────────────────────────────────────
@@ -388,6 +416,9 @@ setupUploadZone('predictUploadZone', 'predictFile', 'predictPreview', 'predictPr
 setupUploadZone('xaiUploadZone', 'xaiFile', 'xaiPreview', 'xaiPreviewImg', () => {
   document.getElementById('btnExplain').disabled = false;
 });
+setupUploadZone('viewUploadZone', 'viewFile', 'viewPreview', 'viewPreviewImg', () => {
+  document.getElementById('btnViewClassify').disabled = false;
+});
 
 document.getElementById('explainChk').addEventListener('change', function () {
   document.getElementById('predictXaiOpts').style.display = this.checked ? '' : 'none';
@@ -400,6 +431,9 @@ const CLASS_COLORS = {
   meningioma: { badge: 'cls-meningioma', bar: 'bar-meningioma' },
   no_tumor:   { badge: 'cls-no_tumor',   bar: 'bar-no_tumor' },
   pituitary:  { badge: 'cls-pituitary',  bar: 'bar-pituitary' },
+  ax:         { badge: 'cls-ax',         bar: 'bar-ax' },
+  co:         { badge: 'cls-co',         bar: 'bar-co' },
+  sa:         { badge: 'cls-sa',         bar: 'bar-sa' },
 };
 
 function classColor(name) {
@@ -742,6 +776,35 @@ document.getElementById('btnExplain').addEventListener('click', async () => {
 
   renderExplanation(explanation, out);
   toast('Explanation generated', 'success');
+});
+
+// ─── VIEW CLASSIFY ───────────────────────────────────────────────────────────
+
+document.getElementById('btnViewClassify').addEventListener('click', async () => {
+  const file = document.getElementById('viewFile').files[0];
+  if (!file) { toast('Select an image first', 'error'); return; }
+
+  status('viewStatus', true);
+  document.getElementById('viewResults').innerHTML = '';
+
+  const form = new FormData();
+  form.append('file', file);
+  form.append('model_name', 'classification.view_classifier');
+
+  const { ok, data } = await apiFetch('/predict/upload', { method: 'POST', body: form });
+  status('viewStatus', false);
+
+  const out = document.getElementById('viewResults');
+  out.innerHTML = '';
+
+  if (!ok) {
+    out.innerHTML = `<div style="color:var(--error);padding:12px">${data.detail || data.error || 'Classification failed'}</div>`;
+    toast('Classification failed', 'error');
+    return;
+  }
+
+  renderClassification(data, out);
+  toast('View classified', 'success');
 });
 
 // ─── INITIAL LOAD ────────────────────────────────────────────────────────────

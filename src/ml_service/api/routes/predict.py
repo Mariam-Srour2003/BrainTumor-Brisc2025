@@ -289,8 +289,9 @@ if router is not None:
         image_path = _store_upload(file, config)
         prediction = predictor.predict(image_path)
         checkpoint_metadata = getattr(predictor, "loaded_checkpoint", {}) or {}
-        task = str(checkpoint_metadata.get("metadata", {}).get("task") or "").lower() or None
-        decoded = _decode_task_output(prediction, config.class_names, task)
+        task = str(checkpoint_metadata.get("metadata", {}).get("task") or checkpoint_metadata.get("resolved_task") or "").lower() or None
+        _output_class_names = config.view_class_names if task == "view_classification" else config.class_names
+        decoded = _decode_task_output(prediction, _output_class_names, task)
         response: dict[str, Any] = {
             "class": decoded["class_name"],
             "class_name": decoded["class_name"],

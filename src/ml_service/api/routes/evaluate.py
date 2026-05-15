@@ -46,14 +46,16 @@ def evaluate_checkpoint(payload: dict[str, Any] | None = None) -> dict[str, Any]
 
     payload = payload or {}
     checkpoint_path = payload.get("checkpoint_path")
+    checkpoint_name: str | None = None
     if not checkpoint_path:
         checkpoint_name = payload.get("checkpoint_name")
-        if checkpoint_name:
-            settings = get_settings()
-            checkpoint_path = resolve_checkpoint_path(settings.models_dir / "checkpoints", str(checkpoint_name))
+        if not checkpoint_name:
+            return {"status": "error", "message": "checkpoint_path or checkpoint_name is required."}
+        settings = get_settings()
+        checkpoint_path = resolve_checkpoint_path(settings.models_dir / "checkpoints", str(checkpoint_name))
 
     if not checkpoint_path:
-        return {"status": "error", "message": "checkpoint_path or checkpoint_name is required."}
+        return {"status": "error", "message": f"No trained checkpoint found for '{checkpoint_name}'. Train the model first."}
 
     split = str(payload.get("split", "test"))
     try:

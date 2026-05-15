@@ -16,7 +16,8 @@ except ImportError:
 
 from ...core.config import get_settings
 from ...core.runtime import get_logger, log_step
-from ...experiments.runner import prepare_dataset, run_all_registered_models_training, run_joint_hyperparameter_tuning, run_joint_training, run_registered_model_training
+from ...core.constants import VIEW_CODES
+from ...experiments.runner import prepare_dataset, prepare_divided_dataset, run_all_registered_models_training, run_joint_hyperparameter_tuning, run_joint_training, run_registered_model_training
 from ...models import DEFAULT_MODEL_REGISTRY
 
 
@@ -33,6 +34,16 @@ def train_model(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     try:
         if action == "prepare":
             summary = prepare_dataset(settings)
+            return {
+                "status": "completed",
+                "action": action,
+                "output_root": summary.output_root,
+                "processed_count": summary.processed_count,
+                "skipped_count": summary.skipped_count,
+            }
+
+        if action == "prepare_divided":
+            summary = prepare_divided_dataset(settings)
             return {
                 "status": "completed",
                 "action": action,
@@ -139,6 +150,12 @@ if router is not None:
                 yield f"data: {json.dumps({'type': 'error', 'message': f'Unknown model: {model_name}'})}\n\n"
             return StreamingResponse(_err(), media_type="text/event-stream")
 
+        # Detect view-specific model (e.g. classification.efficientnet.finetune.ax)
+        _name_parts = model_name.rsplit(".", 1)
+        _view_filter: str | None = _name_parts[1] if len(_name_parts) == 2 and _name_parts[1] in VIEW_CODES else None
+        _base_name = _name_parts[0] if _view_filter else model_name
+        _processed_root = settings.processed_divided_data_root if _view_filter else None
+
         event_q: queue.Queue[dict[str, Any] | None] = queue.Queue()
 
         def _callback(event: dict[str, Any]) -> None:
@@ -148,13 +165,17 @@ if router is not None:
             try:
                 from ...training.trainer import Trainer, TrainingConfig
                 # Segmentation models are binary (tumor vs background) — 1 output channel.
-                # Joint models use joint_class_names (no no_tumor); classification uses all 4 classes.
-                _is_seg = model_name.startswith("segmentation.")
-                _is_hybrid = model_name.startswith("hybrid.")
+                # Joint models use joint_class_names; view_classifier uses 3 view classes;
+                # all other classification models use 4 tumor classes.
+                _is_seg = _base_name.startswith("segmentation.")
+                _is_hybrid = _base_name.startswith("hybrid.")
+                _is_view_clf = model_name == "classification.view_classifier"
                 if _is_seg:
                     _num_classes = 1
                 elif _is_hybrid:
                     _num_classes = len(settings.joint_class_names)
+                elif _is_view_clf:
+                    _num_classes = len(settings.view_class_names)
                 else:
                     _num_classes = len(settings.class_names)
                 model = DEFAULT_MODEL_REGISTRY.create(
@@ -164,13 +185,17 @@ if router is not None:
                     **({"segmentation_classes": 1} if _is_hybrid else {}),
                 )
                 tc = TrainingConfig.from_service_config(settings)
-                trainer = Trainer(model, config=settings, training_config=tc)
+                trainer = Trainer(
+                    model, config=settings, training_config=tc,
+                    view_filter=_view_filter, processed_root=_processed_root,
+                    task="view_classification" if _is_view_clf else "classification",
+                )
 
-                if model_name.startswith("classification."):
+                if _base_name.startswith("classification."):
                     result = trainer.fit_classification(
                         split="train", checkpoint_name=model_name, progress_callback=_callback
                     )
-                elif model_name.startswith("segmentation."):
+                elif _base_name.startswith("segmentation."):
                     result = trainer.fit_segmentation(
                         split="train", checkpoint_name=model_name, progress_callback=_callback
                     )

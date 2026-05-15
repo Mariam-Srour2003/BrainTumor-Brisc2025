@@ -12,6 +12,9 @@ from .constants import (
     DEFAULT_IMAGE_SIZE,
     DEFAULT_NORMALIZE_MEAN,
     DEFAULT_NORMALIZE_STD,
+    DIVIDED_CLASSIFICATION_DATA_ROOT,
+    DIVIDED_PROCESSED_DATA_ROOT,
+    DIVIDED_SEGMENTATION_DATA_ROOT,
     JOINT_CLASS_NAMES,
     MODELS_DIR,
     NOTEBOOKS_DIR,
@@ -20,6 +23,7 @@ from .constants import (
     PROJECT_ROOT,
     SEGMENTATION_DATA_ROOT,
     TRAIN_SPLITS,
+    VIEW_CLASS_NAMES,
 )
 
 
@@ -31,12 +35,16 @@ class ServiceConfig:
     data_root: Path = DATA_ROOT
     classification_data_root: Path = CLASSIFICATION_DATA_ROOT
     segmentation_data_root: Path = SEGMENTATION_DATA_ROOT
+    divided_classification_data_root: Path = DIVIDED_CLASSIFICATION_DATA_ROOT
+    divided_segmentation_data_root: Path = DIVIDED_SEGMENTATION_DATA_ROOT
     models_dir: Path = MODELS_DIR
     outputs_dir: Path = OUTPUTS_DIR
     processed_data_root: Path = PROCESSED_DATA_ROOT
+    processed_divided_data_root: Path = DIVIDED_PROCESSED_DATA_ROOT
     notebooks_dir: Path = NOTEBOOKS_DIR
     class_names: tuple[str, ...] = CLASS_NAMES
     joint_class_names: tuple[str, ...] = JOINT_CLASS_NAMES
+    view_class_names: tuple[str, ...] = VIEW_CLASS_NAMES
     train_splits: tuple[str, ...] = TRAIN_SPLITS
     image_size: tuple[int, int] = DEFAULT_IMAGE_SIZE
     normalize_mean: tuple[float, float, float] = DEFAULT_NORMALIZE_MEAN

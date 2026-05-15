@@ -120,6 +120,27 @@ def resolve_checkpoint_path(
     if loose_candidates:
         return loose_candidates[0]
 
+    # Partial-match fallback: find the checkpoint whose filename contains the most
+    # tokens from the requested name. Useful when e.g. hybrid.adpt_net.ax is looked up
+    # but only hybrid.tgd_adpt_net.ax exists on disk.
+    tokens = [t for t in safe_model_name.replace("-", "_").split(".") if len(t) > 1]
+    if tokens:
+        all_pts = sorted(
+            (p for p in checkpoint_root.rglob("*.pt") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        best_path: Path | None = None
+        best_score = 0
+        for pt in all_pts:
+            stem = pt.stem.replace("-", "_")
+            score = sum(1 for t in tokens if t in stem)
+            if score > best_score:
+                best_score = score
+                best_path = pt
+        if best_score >= max(1, len(tokens) - 1):
+            return best_path
+
     return None
 
 

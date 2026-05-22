@@ -192,7 +192,7 @@ h3{font-size:14px;font-weight:600;margin:20px 0 8px;color:#2d4a8a}
 .tag-seg{background:#dcfce7;color:#166534}
 .tag-joint{background:#f3e8ff;color:#6b21a8}
 .tag-view{background:#fef9c3;color:#854d0e}
-.view-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:24px;margin-bottom:24px}
+.view-grid{display:grid;grid-template-columns:1fr;gap:24px;margin-bottom:24px}
 .view-card{background:#fff;border-radius:12px;padding:18px;box-shadow:0 1px 4px rgba(0,0,0,.07)}
 .view-card h3{margin-top:0}
 .empty-note{color:#aaa;font-style:italic;padding:12px 0}

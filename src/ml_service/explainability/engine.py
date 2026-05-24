@@ -251,14 +251,14 @@ class ExplainabilityEngine:
             if request.method == "lime":
                 return self._lime(request)
             raise ValueError(f"Unsupported explainability method: {request.method}")
-        except ImportError as exc:
-            log_step(self.logger, f"Optional dependency missing for method={request.method}: {exc}")
+        except (ImportError, ValueError) as exc:
+            log_step(self.logger, f"Explain failed for method={request.method}: {exc}")
             return ExplainabilityArtifact(
                 method=request.method,
                 task=request.target_task if request.target_task != "auto" else "classification",
                 target_class=request.target_class,
                 original_image_path=str(request.image_path),
-                metadata={"error": str(exc), "missing_dependency": True},
+                metadata={"error": str(exc), "missing_dependency": isinstance(exc, ImportError)},
             )
 
     def _prepare_input(self, image_path: str | Path) -> tuple[Image.Image, np.ndarray, Any]:
@@ -435,14 +435,47 @@ class ExplainabilityEngine:
         except ImportError as exc:
             raise ImportError("Install shap to use SHAP explanations.") from exc
 
-        image, _, image_array = self._prepare_input(request.image_path)
+        from ..data.preprocessing import preprocess_image
+        # Use the preprocessed 224×224 image for both the SHAP masker and the overlay
+        # so all arrays are at the same resolution (ViT patch_embed requires 224×224).
+        preprocessed = preprocess_image(request.image_path, self.preprocessing_config)
+        image = preprocessed  # PIL 224×224 — used for the overlay later
+        image_array = np.asarray(preprocessed.convert("RGB"), dtype=np.float32) / 255.0  # (H, W, 3)
+
+        mean = np.array(self.preprocessing_config.normalize_mean, dtype=np.float32)
+        std = np.array(self.preprocessing_config.normalize_std, dtype=np.float32)
+
+        # Preflight: SHAP needs a multi-class classification output to produce meaningful
+        # attribution maps. Segmentation-only models return a single-channel spatial mask
+        # which, after pooling, gives constant softmax output → zero SHAP values → black image.
+        _torch_pre, _ = _require_torch()
+        with _torch_pre.no_grad():
+            _pre_tensor = _torch_pre.tensor(
+                ((image_array - mean) / std).transpose(2, 0, 1)[None],
+                dtype=_torch_pre.float32, device=self.device,
+            )
+            _pre_out = self.model(_pre_tensor)
+            _pre_logits = _classification_logits(_pre_out)
+            if _pre_logits.ndim == 4:
+                _pre_logits = _pre_logits.mean(dim=(2, 3))
+            if _pre_logits.shape[1] < 2:
+                raise ValueError(
+                    "SHAP requires a model with at least 2 classification output classes. "
+                    "This model only produces a segmentation mask. Use GradCAM instead."
+                )
 
         def predict_fn(batch: np.ndarray) -> np.ndarray:
+            # batch: (N, H, W, C) in [0, 1] range — normalize before the model
             torch, _ = _require_torch()
             self.model.eval()
-            batch_tensor = torch.tensor(batch.transpose(0, 3, 1, 2), dtype=torch.float32, device=self.device)
+            normalized = (batch - mean) / std
+            batch_tensor = torch.tensor(normalized.transpose(0, 3, 1, 2), dtype=torch.float32, device=self.device)
             outputs = self.model(batch_tensor)
             logits = _classification_logits(outputs)
+            if logits.ndim == 4:        # (N, C, H, W) — segmentation spatial output
+                logits = logits.mean(dim=(2, 3))
+            elif logits.ndim == 3:      # (N, C, T) — sequence output
+                logits = logits.mean(dim=2)
             probabilities = torch.softmax(logits, dim=1)
             return probabilities.detach().cpu().numpy()
 
@@ -492,16 +525,60 @@ class ExplainabilityEngine:
         except ImportError as exc:
             raise ImportError("Install lime to use LIME explanations.") from exc
 
-        image, _, image_array = self._prepare_input(request.image_path)
+        from ..data.preprocessing import preprocess_image
+        # Use the preprocessed 224×224 image so LIME generates patches at the correct
+        # model input size (ViT patch_embed requires exactly config.image_size).
+        preprocessed = preprocess_image(request.image_path, self.preprocessing_config)
+        image_array = np.asarray(preprocessed.convert("RGB"), dtype=np.float32) / 255.0  # (H, W, 3)
+
+        mean = np.array(self.preprocessing_config.normalize_mean, dtype=np.float32)
+        std = np.array(self.preprocessing_config.normalize_std, dtype=np.float32)
+
+        # Preflight: LIME needs a multi-class classification output to assign superpixel
+        # importance scores. Segmentation-only models produce a constant pooled output
+        # → every superpixel gets zero importance → blank mask.
+        _torch_pre, _ = _require_torch()
+        with _torch_pre.no_grad():
+            _pre_tensor = _torch_pre.tensor(
+                ((image_array - mean) / std).transpose(2, 0, 1)[None],
+                dtype=_torch_pre.float32, device=self.device,
+            )
+            _pre_out = self.model(_pre_tensor)
+            _pre_logits = _classification_logits(_pre_out)
+            if _pre_logits.ndim == 4:
+                _pre_logits = _pre_logits.mean(dim=(2, 3))
+            if _pre_logits.shape[1] < 2:
+                raise ValueError(
+                    "LIME requires a model with at least 2 classification output classes. "
+                    "This model only produces a segmentation mask. Use GradCAM instead."
+                )
 
         def predict_fn(batch: np.ndarray) -> np.ndarray:
+            # batch: (N, H, W, C) uint8 from LIME — normalize before the model
             torch, _ = _require_torch()
             self.model.eval()
-            batch_tensor = torch.tensor(batch.transpose(0, 3, 1, 2), dtype=torch.float32, device=self.device)
+            normalized = (batch.astype(np.float32) / 255.0 - mean) / std
+            batch_tensor = torch.tensor(normalized.transpose(0, 3, 1, 2), dtype=torch.float32, device=self.device)
             outputs = self.model(batch_tensor)
             logits = _classification_logits(outputs)
+            # Guard: LIME requires exactly (N, num_classes). If the model returns a
+            # spatial tensor (e.g. segmentation head leaking through), pool it down.
+            if logits.ndim == 4:        # (N, C, H, W) — global average pool
+                logits = logits.mean(dim=(2, 3))
+            elif logits.ndim == 3:      # (N, C, T) — mean over last dim
+                logits = logits.mean(dim=2)
             probabilities = torch.softmax(logits, dim=1)
             return probabilities.detach().cpu().numpy()
+
+        # Use SLIC with a fixed segment count to prevent quickshift from creating
+        # one segment per pixel on high-contrast CLAHE images (50 176 segments →
+        # (1000, 50176) data matrix → TiB-scale intermediate allocations in LIME).
+        try:
+            from skimage.segmentation import slic
+            def segmentation_fn(img: np.ndarray) -> np.ndarray:
+                return slic(img, n_segments=100, compactness=10, sigma=1, start_label=0)
+        except ImportError:
+            segmentation_fn = None  # fall back to LIME default quickshift
 
         explainer = lime_image.LimeImageExplainer()
         explanation = explainer.explain_instance(
@@ -509,7 +586,9 @@ class ExplainabilityEngine:
             predict_fn,
             top_labels=1,
             hide_color=0,
-            num_samples=1000,
+            num_samples=200,
+            batch_size=32,
+            segmentation_fn=segmentation_fn,
         )
 
         label = request.target_class if request.target_class is not None else int(explanation.top_labels[0])
@@ -536,5 +615,5 @@ class ExplainabilityEngine:
             raw_path=str(mask_path),
             overlay_base64=_encode_image(overlay),
             raw_base64=_encode_image(mask_img),
-            metadata={"top_labels": list(explanation.top_labels)},
+            metadata={"top_labels": [int(l) for l in explanation.top_labels]},
         )

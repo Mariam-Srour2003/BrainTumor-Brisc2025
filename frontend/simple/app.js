@@ -921,10 +921,11 @@ function renderSegmentation(data, originalSrc, container, sectionTitle) {
 
 function renderExplanation(explanation, container) {
   if (!explanation) return;
-  if (explanation.metadata && explanation.metadata.missing_dependency) {
+  if (explanation.metadata && explanation.metadata.error) {
+    var isWarn = explanation.metadata.missing_dependency;
     container.insertAdjacentHTML('beforeend',
-      '<div style="color:var(--warn);padding:10px;font-size:13px">' +
-      'Warning: ' + (explanation.metadata.error || 'Optional dependency not installed') + '</div>');
+      '<div style="color:' + (isWarn ? 'var(--warn)' : 'var(--error)') + ';padding:10px;font-size:13px">' +
+      (isWarn ? 'Warning: ' : 'Error: ') + explanation.metadata.error + '</div>');
     return;
   }
   if (explanation.task === 'joint' || (explanation.classification && explanation.segmentation)) {
